@@ -14,7 +14,7 @@ void tearDown(void) {
 
 // Test: Batch with 2 identical readings
 void test_batch_two_identical_readings(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -48,7 +48,7 @@ void test_batch_two_identical_readings(void) {
 
 // Test: Batch with different readings
 void test_batch_different_readings(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     // Reading 1: Temperature only
@@ -81,7 +81,7 @@ void test_batch_different_readings(void) {
 
 // Test: Batch with 5 readings
 void test_batch_five_readings(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     for (int i = 0; i < 5; i++) {
@@ -103,7 +103,7 @@ void test_batch_five_readings(void) {
 
 // Test: Batch with 10 readings
 void test_batch_ten_readings(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     for (int i = 0; i < 10; i++) {
@@ -123,7 +123,7 @@ void test_batch_ten_readings(void) {
 
 // Test: Batch with 20 readings (MAX_BATCH_SIZE)
 void test_batch_max_readings(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     for (int i = 0; i < MAX_BATCH_SIZE; i++) {
@@ -144,7 +144,7 @@ void test_batch_max_readings(void) {
 
 // Test: Batch with different presence masks per reading
 void test_batch_variable_masks(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     // Reading 1: Temp + CO2
@@ -196,7 +196,7 @@ void test_batch_variable_masks(void) {
 
 // Test: Batch dual mode with expandable fields
 void test_batch_dual_mode(void) {
-    PayloadHeader header = {1, true, 5};  // Dual mode
+    PayloadHeader header = {1, true, false, 5};  // Dual mode
     encoder.init(header);
 
     // Reading 1: Temp (expandable)
@@ -229,7 +229,7 @@ void test_batch_dual_mode(void) {
 
 // Test: Size calculation for batches
 void test_batch_size_calculation(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -254,7 +254,7 @@ void test_batch_size_calculation(void) {
 
 // Test: Large batch with many sensors
 void test_batch_large_payload(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     for (int i = 0; i < 15; i++) {
@@ -285,7 +285,7 @@ void test_batch_large_payload(void) {
 
 // Test: Batch with mix of 16-bit and 32-bit fields
 void test_batch_mixed_field_sizes(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     // Reading 1: 16-bit fields
@@ -314,7 +314,7 @@ void test_batch_mixed_field_sizes(void) {
 
 // Test: Reset clears batch
 void test_batch_reset(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;

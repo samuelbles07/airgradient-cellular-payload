@@ -9,7 +9,7 @@ C++ encoder for AirGradient binary cellular payload format, optimized for embedd
 - ✅ Single and dual-channel modes
 - ✅ Batch encoding (up to 20 readings)
 - ✅ Little-endian encoding
-- ✅ Comprehensive unit tests (44 tests)
+- ✅ Comprehensive unit tests (47 tests)
 
 ## Building
 
@@ -62,7 +62,7 @@ make run_tests
 
 // Initialize encoder
 PayloadEncoder encoder;
-PayloadHeader header = {1, false, 5};  // Version 1, single mode, 5 min interval
+PayloadHeader header = {1, false, false, 5};  // Version 1, single mode, no dedicated temp/hum, 5 min interval
 encoder.init(header);
 
 // Create a sensor reading
@@ -151,7 +151,7 @@ When setting sensor values, apply these scaling factors:
 - `src/payload_encoder.h` - Encoder class declaration
 - `src/payload_encoder.cpp` - Encoder implementation
 - `src/main.cpp` - Example usage
-- `test/` - Unit tests (44 tests total)
+- `test/` - Unit tests (47 tests total)
 
 ## License
 

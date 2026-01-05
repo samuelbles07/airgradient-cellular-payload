@@ -24,7 +24,7 @@ void example1_single_reading() {
   printf("=== Example 1: Single Reading (Temp + CO2) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5}; // Version 1, single mode, 5 min
+  PayloadHeader header = {1, false, false, 5}; // Version 1, single mode, no dedicated temp/hum, 5 min
   encoder.init(header);
 
   // Create a sensor reading
@@ -56,7 +56,7 @@ void example2_dual_channel() {
   printf("=== Example 2: Dual Channel Mode ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, true, 5}; // Version 1, DUAL mode, 5 min
+  PayloadHeader header = {1, true, false, 5}; // Version 1, DUAL mode, no dedicated temp/hum, 5 min
   encoder.init(header);
 
   SensorReading reading;
@@ -93,7 +93,7 @@ void example3_batch_readings() {
   printf("=== Example 3: Batch of 3 Readings ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 10}; // 10 minute interval
+  PayloadHeader header = {1, false, false, 10}; // Version 1, single mode, no dedicated temp/hum, 10 min interval
   encoder.init(header);
 
   // Reading 1
@@ -136,7 +136,7 @@ void example4_pm_sensors() {
   printf("=== Example 4: PM Sensors ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5};
+  PayloadHeader header = {1, false, false, 5};
   encoder.init(header);
 
   SensorReading reading;
@@ -165,7 +165,7 @@ void example5_all_sensors() {
   printf("=== Example 5: Multiple Sensor Types ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5};
+  PayloadHeader header = {1, false, false, 5};
   encoder.init(header);
 
   SensorReading reading;
@@ -218,7 +218,7 @@ void example6_negative_temp() {
   printf("=== Example 6: Negative Temperature ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5};
+  PayloadHeader header = {1, false, false, 5};
   encoder.init(header);
 
   SensorReading reading;
@@ -244,7 +244,7 @@ void example7_size_calculation() {
   printf("=== Example 7: Size Calculation ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5};
+  PayloadHeader header = {1, false, false, 5};
   encoder.init(header);
 
   SensorReading reading;
@@ -277,7 +277,7 @@ void example8_error_handling() {
   printf("=== Example 8: Error Handling ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, 5};
+  PayloadHeader header = {1, false, false, 5};
   encoder.init(header);
 
   SensorReading reading;

@@ -104,8 +104,8 @@ int32_t PayloadEncoder::encodeSensorData(uint8_t *buffer, uint32_t buffer_size,
                                          const SensorReading &reading) const {
   uint32_t offset = 0;
 
-  // Iterate through flags in order (0-25)
-  for (uint8_t flag = 0; flag <= FLAG_AFE_TEMP; flag++) {
+  // Iterate through flags in order (0-26)
+  for (uint8_t flag = 0; flag <= FLAG_SIGNAL; flag++) {
     if (!IS_FLAG_SET(reading.presence_mask, flag)) {
       continue; // Skip if flag not set
     }

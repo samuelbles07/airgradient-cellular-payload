@@ -10,7 +10,7 @@ int main(void) {
 
     // Test Single Channel Mode - All Flags Set
     PayloadEncoder encoder_single;
-    PayloadHeader header_single = {1, false, 5};
+    PayloadHeader header_single = {1, false, false, 5};
     encoder_single.init(header_single);
 
     SensorReading reading_all;
@@ -77,7 +77,7 @@ int main(void) {
 
     // Test Dual Channel Mode - All Flags Set
     PayloadEncoder encoder_dual;
-    PayloadHeader header_dual = {1, true, 5};
+    PayloadHeader header_dual = {1, true, false, 5};
     encoder_dual.init(header_dual);
     encoder_dual.addReading(reading_all);
 

@@ -18,7 +18,7 @@ void tearDown(void) {
 // Mask: 0x00000005 (Bits 0 & 2 set: Temp + CO2)
 // Expected: Temp sends 2 values, CO2 sends 1 value (scalar)
 void test_rfc_example_dual_channel(void) {
-    PayloadHeader header = {1, true, 5};  // dual_mode = true
+    PayloadHeader header = {1, true, false, 5};  // dual_mode = true
     encoder.init(header);
 
     SensorReading reading;
@@ -67,7 +67,7 @@ void test_rfc_example_dual_channel(void) {
 
 // Test: Dual channel with humidity
 void test_dual_channel_humidity(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -96,7 +96,7 @@ void test_dual_channel_humidity(void) {
 
 // Test: Dual channel PM sensors
 void test_dual_channel_pm_sensors(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -126,7 +126,7 @@ void test_dual_channel_pm_sensors(void) {
 
 // Test: Dual channel mixed expandable and scalar
 void test_dual_channel_mixed(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -166,7 +166,7 @@ void test_dual_channel_mixed(void) {
 
 // Test: Scalar fields stay single value in dual mode
 void test_dual_channel_scalars_single_value(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -199,7 +199,7 @@ void test_dual_channel_scalars_single_value(void) {
 
 // Test: 32-bit fields remain scalar in dual mode
 void test_dual_channel_32bit_scalar(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -226,7 +226,7 @@ void test_dual_channel_32bit_scalar(void) {
 
 // Test: All expandable fields in dual mode
 void test_dual_channel_all_expandable(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -267,7 +267,7 @@ void test_dual_channel_all_expandable(void) {
 
 // Test: Size calculation in dual mode
 void test_dual_channel_size_calculation(void) {
-    PayloadHeader header = {1, true, 5};
+    PayloadHeader header = {1, true, false, 5};
     encoder.init(header);
 
     SensorReading reading;

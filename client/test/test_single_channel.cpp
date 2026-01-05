@@ -18,7 +18,7 @@ void tearDown(void) {
 // Mask: 0x00000005 (Bits 0 & 2 set: Temp + CO2)
 // Expected output: [0x01, 0x05, 0x05, 0x00, 0x00, 0x00, temp_low, temp_high, co2_low, co2_high]
 void test_rfc_example_single_channel(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -61,7 +61,7 @@ void test_rfc_example_single_channel(void) {
 
 // Test: Single channel with humidity only
 void test_single_channel_humidity_only(void) {
-    PayloadHeader header = {1, false, 10};
+    PayloadHeader header = {1, false, false, 10};
     encoder.init(header);
 
     SensorReading reading;
@@ -92,7 +92,7 @@ void test_single_channel_humidity_only(void) {
 
 // Test: Multiple scalar fields
 void test_single_channel_multiple_scalars(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -122,7 +122,7 @@ void test_single_channel_multiple_scalars(void) {
 
 // Test: PM sensors in order
 void test_single_channel_pm_sensors(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -160,7 +160,7 @@ void test_single_channel_pm_sensors(void) {
 
 // Test: 32-bit fields (O3/NO2 electrodes)
 void test_single_channel_32bit_fields(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -187,7 +187,7 @@ void test_single_channel_32bit_fields(void) {
 
 // Test: Negative temperature
 void test_single_channel_negative_temperature(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -211,7 +211,7 @@ void test_single_channel_negative_temperature(void) {
 
 // Test: All sensor types
 void test_single_channel_all_sensors(void) {
-    PayloadHeader header = {1, false, 5};
+    PayloadHeader header = {1, false, false, 5};
     encoder.init(header);
 
     SensorReading reading;
@@ -295,6 +295,41 @@ void test_single_channel_signal(void) {
     TEST_ASSERT_EQUAL_UINT8(0xB5, buffer[6]);
 }
 
+// Test: Dedicated temp/hum sensor in single mode (edge case)
+void test_dedicated_sensor_single_mode(void) {
+    PayloadHeader header = {1, false, true, 5};  // single mode, dedicated=true
+    encoder.init(header);
+
+    SensorReading reading;
+    initSensorReading(&reading);
+
+    // Set temp and humidity from dedicated sensor
+    setFlag(&reading, FLAG_TEMP);
+    reading.temp[0] = 2500;  // 25.00°C
+
+    setFlag(&reading, FLAG_HUM);
+    reading.hum[0] = 6000;  // 60.00%
+
+    setFlag(&reading, FLAG_CO2);
+    reading.co2 = 400;
+
+    encoder.addReading(reading);
+
+    uint8_t buffer[256];
+    int32_t size = encoder.encode(buffer, sizeof(buffer));
+
+    // Size: 2 (header) + 4 (mask) + 2 (temp) + 2 (hum) + 2 (co2) = 12 bytes
+    TEST_ASSERT_EQUAL_INT32(12, size);
+
+    // Verify metadata has dedicated flag set (bit 4)
+    // Binary: 0001 0001 = 0x11 (version=1, dual=0, dedicated=1)
+    TEST_ASSERT_EQUAL_UINT8(0x11, buffer[0]);
+
+    // Verify only 1 value is encoded for temp/hum (same as non-dedicated single mode)
+    // This validates correct behavior even though the flag is redundant in single mode
+    TEST_ASSERT_EQUAL_UINT8(0x07, buffer[2]);  // Mask bits 0,1,2 (temp,hum,co2)
+}
+
 int main(void) {
     UNITY_BEGIN();
 
@@ -306,6 +341,7 @@ int main(void) {
     RUN_TEST(test_single_channel_negative_temperature);
     RUN_TEST(test_single_channel_all_sensors);
     RUN_TEST(test_single_channel_signal);
+    RUN_TEST(test_dedicated_sensor_single_mode);
 
     return UNITY_END();
 }
