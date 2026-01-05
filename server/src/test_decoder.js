@@ -166,7 +166,7 @@ console.log('=== Test 11: Dedicated Temp/Hum Sensor (Bit 4) ===');
 const test11Buffer = Buffer.from([
   0x19,       // Metadata (Version=1, Dual=1, Dedicated=1) = 0001 1001
   0x05,       // Interval (5 minutes)
-  0x07, 0x01, 0x00, 0x00,  // Presence Mask (bits 0,1,8 = temp,hum,pm25)
+  0x03, 0x01, 0x00, 0x00,  // Presence Mask (bits 0,1,8 = temp,hum,pm25)
   0xC4, 0x09,              // Temp (single value, even in dual mode)
   0x70, 0x17,              // Hum (single value, even in dual mode)
   0x7D, 0x00,              // PM25[0] = 125 (still dual)

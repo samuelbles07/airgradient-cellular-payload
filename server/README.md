@@ -31,6 +31,7 @@ Output:
   "header": {
     "version": 1,
     "dualMode": false,
+    "dedicatedTempHumSensor": false,
     "intervalMinutes": 5
   },
   "readings": [
@@ -87,11 +88,11 @@ console.log(json);
 
 ### Helper Functions
 
-- `decodeMetadata(metadata)` - Decode metadata byte
-- `decodeReading(buffer, offset, dualMode)` - Decode single reading
-- `decodeSensorData(buffer, offset, presenceMask, dualMode)` - Decode sensor data
+- `decodeMetadata(metadata)` - Decode metadata byte (returns `{ version, dualMode, dedicatedTempHumSensor }`)
+- `decodeReading(buffer, offset, dualMode, dedicatedTempHumSensor, applyScaling)` - Decode single reading
+- `decodeSensorData(buffer, offset, presenceMask, dualMode, dedicatedTempHumSensor, applyScaling)` - Decode sensor data
 - `isFlagSet(mask, flag)` - Check if flag is set in presence mask
-- `isExpandable(flag)` - Check if sensor field is expandable
+- `isExpandable(flag, dedicatedTempHumSensor)` - Check if sensor field is expandable
 
 ## Usage in CoAP Server
 
@@ -183,6 +184,36 @@ In dual channel mode, expandable fields send two values:
   co2: 400                    // Scalar fields stay single
 }
 ```
+
+### Dedicated Temperature/Humidity Sensor
+
+When the `dedicatedTempHumSensor` flag is set in the header (metadata bit 4), temperature and humidity values come from a dedicated sensor instead of the PM sensor. In this mode:
+
+- **Temperature and Humidity**: Send only **1 value** even in dual channel mode
+- **Other expandable fields** (PM sensors, particle counts): Still send **2 values** in dual channel mode
+- **Scalar fields**: Always send **1 value** (unchanged)
+
+```javascript
+// Dual mode WITHOUT dedicated sensor
+{
+  dualMode: true,
+  dedicatedTempHumSensor: false,
+  temperature: [25.0, 26.0],  // Two values (from PM sensors)
+  humidity: [60.0, 62.0],     // Two values (from PM sensors)
+  pm25: [12.5, 13.5]          // Two values
+}
+
+// Dual mode WITH dedicated sensor
+{
+  dualMode: true,
+  dedicatedTempHumSensor: true,
+  temperature: 25.0,          // Single value (from dedicated sensor)
+  humidity: 60.0,             // Single value (from dedicated sensor)
+  pm25: [12.5, 13.5]          // Still dual values
+}
+```
+
+This feature allows monitors with a dedicated temperature/humidity sensor to report accurate environmental data while still supporting dual PM sensors.
 
 ## Testing
 
