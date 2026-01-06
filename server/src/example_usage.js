@@ -201,4 +201,23 @@ if (Array.isArray(reading.temperature)) {
 }
 console.log('\n');
 
+// ========================================
+// Example 8: Working with Dual Channel + Dedicated Temp hum
+// ========================================
+console.log('=== Example 8: Dual Channel Data + Dedicated Temp hum from client example output===\n');
+
+// 19 05 07 01 00 00 C4 09 70 17 A9 01 70 00 C1 00
+const dualPayload2 = Buffer.from([
+  0x19, 0x05,  // Dual mode with dedicated sensor
+  0x07, 0x01, 0x00, 0x00, // ....
+  0xC4, 0x09,  // Temp
+  0x70, 0x17,  // Hum
+  0xA9, 0x01,   // CO2
+  0x70, 0x00,   // PM_25 AE [0]
+  0xC1, 0x00,   // PM_25 AE [1]
+]);
+
+console.log(decodePayloadToJSON(dualPayload2, true));
+console.log('\n');
+
 console.log('=== Examples Complete ===');

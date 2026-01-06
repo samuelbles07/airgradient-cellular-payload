@@ -1,4 +1,5 @@
 #include "payload_encoder.h"
+#include "payload_types.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -24,7 +25,8 @@ void example1_single_reading() {
   printf("=== Example 1: Single Reading (Temp + CO2) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5}; // Version 1, single mode, no dedicated temp/hum, 5 min
+  PayloadHeader header = {1, false, false,
+                          5}; // Version 1, single mode, no dedicated temp/hum, 5 min
   encoder.init(header);
 
   // Create a sensor reading
@@ -93,7 +95,8 @@ void example3_batch_readings() {
   printf("=== Example 3: Batch of 3 Readings ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 10}; // Version 1, single mode, no dedicated temp/hum, 10 min interval
+  PayloadHeader header = {1, false, false,
+                          10}; // Version 1, single mode, no dedicated temp/hum, 10 min interval
   encoder.init(header);
 
   // Reading 1
@@ -305,6 +308,44 @@ void example8_error_handling() {
   printf("\n");
 }
 
+void example9_dedicated_temphum() {
+  printf("=== Example 9: Dedicated temperature humidity===\n");
+
+  PayloadEncoder encoder;
+  PayloadHeader header = {1, true, true, 5}; // Version 1, DUAL mode, dedicated temp/hum, 5 min
+  encoder.init(header);
+
+  SensorReading reading;
+  initSensorReading(&reading);
+
+  // Temperature
+  setFlag(&reading, FLAG_TEMP);
+  reading.temp[0] = 2500; // 25.00°C
+
+  // Humidity
+  setFlag(&reading, FLAG_HUM);
+  reading.hum[0] = 6000; // 60.00%
+
+  // CO2 (scalar - only one value even in dual mode)
+  setFlag(&reading, FLAG_CO2);
+  reading.co2 = 425;
+
+  // PM2.5 AE (dual)
+  setFlag(&reading, FLAG_PM_25);
+  reading.pm_25[0] = 112;
+  reading.pm_25[1] = 193;
+
+  encoder.addReading(reading);
+
+  uint8_t buffer[256];
+  int32_t size = encoder.encode(buffer, sizeof(buffer));
+
+  printHex("Encoded Payload (Dual Mode & dedicated temp hum)", buffer, size);
+  printf("Note: Temperature and humidity only send 1 value\n");
+  printf("      CO2 is scalar, so only 1 value\n");
+  printf("      PM25 is dual since dual mode set \n\n");
+}
+
 int main() {
   printf("╔═══════════════════════════════════════════════╗\n");
   printf("║  AirGradient Cellular Payload Encoder        ║\n");
@@ -319,6 +360,7 @@ int main() {
   example6_negative_temp();
   example7_size_calculation();
   example8_error_handling();
+  example9_dedicated_temphum();
 
   printf("╔═══════════════════════════════════════════════╗\n");
   printf("║  All examples completed successfully!        ║\n");
