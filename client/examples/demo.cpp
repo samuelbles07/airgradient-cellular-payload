@@ -1,13 +1,10 @@
-#include "payload_encoder.h"
-#include "payload_types.h"
+#include "../src/payload_encoder.h"
+#include "stdint.h"
 #include <stdio.h>
 #include <string.h>
 
-/**
- * Print buffer contents in hex format
- */
-void printHex(const char *label, const uint8_t *buffer, int32_t size) {
-  printf("%s (%d bytes):\n", label, size);
+static void printHex(const char *label, const uint8_t *buffer, int32_t size) {
+  printf("%s (%d bytes):\n", label, (int)size);
   printf("  ");
   for (int32_t i = 0; i < size; i++) {
     printf("%02X ", buffer[i]);
@@ -18,353 +15,191 @@ void printHex(const char *label, const uint8_t *buffer, int32_t size) {
   printf("\n\n");
 }
 
-/**
- * Example 1: Single reading with temperature and CO2
- */
-void example1_single_reading() {
-  printf("=== Example 1: Single Reading (Temp + CO2) ===\n");
+static void printHeaderSummary(const uint8_t *buffer, int32_t size) {
+  if (size < 2) {
+    return;
+  }
+
+  const uint8_t metadata = buffer[0];
+  const uint8_t interval = buffer[1];
+  const uint8_t version = (uint8_t)(metadata & 0x1F);
+  const uint8_t shared_mask = (uint8_t)((metadata >> AG_METADATA_SHARED_PRESENCE_MASK_BIT) & 1U);
+
+  printf("Header: metadata=0x%02X (ver=%u, shared_mask=%u), interval=%u\n", metadata, version,
+         shared_mask, interval);
+
+  if (shared_mask && size >= 10) {
+    printf("Shared mask bytes (LE): ");
+    for (int i = 0; i < 8; i++) {
+      printf("%02X ", buffer[2 + i]);
+    }
+    printf("\n");
+  }
+  printf("\n");
+}
+
+static void example_single_temp_co2(void) {
+  printf("=== Example: Single Reading (Temp + CO2) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false,
-                          5}; // Version 1, single mode, no dedicated temp/hum, 5 min
+  PayloadHeader header = {5};
   encoder.init(header);
 
-  // Create a sensor reading
   SensorReading reading;
   initSensorReading(&reading);
 
-  // Set temperature = 25.50°C (2550 after scaling by 100)
   setFlag(&reading, FLAG_TEMP);
-  reading.temp[0] = 2550;
+  reading.temp = 2550; // 25.50C (scaled by 100)
 
-  // Set CO2 = 412 ppm
   setFlag(&reading, FLAG_CO2);
   reading.co2 = 412;
 
   encoder.addReading(reading);
 
-  // Encode to buffer
-  uint8_t buffer[256];
+  uint8_t buffer[64];
   int32_t size = encoder.encode(buffer, sizeof(buffer));
-
   printHex("Encoded Payload", buffer, size);
-  printf("Expected size: 10 bytes (2 header + 4 mask + 2 temp + 2 co2)\n\n");
+  printHeaderSummary(buffer, size);
 }
 
-/**
- * Example 2: Dual channel mode with expandable fields
- */
-void example2_dual_channel() {
-  printf("=== Example 2: Dual Channel Mode ===\n");
+static void example_batch_shared_mask(void) {
+  printf("=== Example: Batch (3 CO2 readings; shared mask) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, true, false, 5}; // Version 1, DUAL mode, no dedicated temp/hum, 5 min
+  PayloadHeader header = {10};
   encoder.init(header);
 
-  SensorReading reading;
-  initSensorReading(&reading);
+  for (int i = 0; i < 3; i++) {
+    SensorReading reading;
+    initSensorReading(&reading);
+    setFlag(&reading, FLAG_CO2);
+    reading.co2 = (uint16_t)(400 + i * 10);
+    encoder.addReading(reading);
+  }
 
-  // Temperature from 2 sensors
-  setFlag(&reading, FLAG_TEMP);
-  reading.temp[0] = 2500; // 25.00°C
-  reading.temp[1] = 2650; // 26.50°C
-
-  // Humidity from 2 sensors
-  setFlag(&reading, FLAG_HUM);
-  reading.hum[0] = 6000; // 60.00%
-  reading.hum[1] = 6250; // 62.50%
-
-  // CO2 (scalar - only one value even in dual mode)
-  setFlag(&reading, FLAG_CO2);
-  reading.co2 = 425;
-
-  encoder.addReading(reading);
-
-  uint8_t buffer[256];
+  uint8_t buffer[64];
   int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printHex("Encoded Payload (Dual Mode)", buffer, size);
-  printf("Note: Temperature and humidity send 2 values each\n");
-  printf("      CO2 is scalar, so only 1 value\n\n");
-}
-
-/**
- * Example 3: Multiple readings (batch)
- */
-void example3_batch_readings() {
-  printf("=== Example 3: Batch of 3 Readings ===\n");
-
-  PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false,
-                          10}; // Version 1, single mode, no dedicated temp/hum, 10 min interval
-  encoder.init(header);
-
-  // Reading 1
-  SensorReading reading1;
-  initSensorReading(&reading1);
-  setFlag(&reading1, FLAG_CO2);
-  reading1.co2 = 400;
-  encoder.addReading(reading1);
-
-  // Reading 2
-  SensorReading reading2;
-  initSensorReading(&reading2);
-  setFlag(&reading2, FLAG_CO2);
-  reading2.co2 = 410;
-  encoder.addReading(reading2);
-
-  // Reading 3
-  SensorReading reading3;
-  initSensorReading(&reading3);
-  setFlag(&reading3, FLAG_CO2);
-  reading3.co2 = 420;
-  encoder.addReading(reading3);
-
-  printf("Added %d readings to batch\n", encoder.getReadingCount());
-
-  uint8_t buffer[256];
-  int32_t size = encoder.encode(buffer, sizeof(buffer));
-
   printHex("Encoded Batch Payload", buffer, size);
-  printf("Size breakdown:\n");
-  printf("  Header: 2 bytes\n");
-  printf("  Each reading: 6 bytes (4 mask + 2 co2)\n");
-  printf("  Total: 2 + 3*6 = 20 bytes\n\n");
+  printHeaderSummary(buffer, size);
 }
 
-/**
- * Example 4: PM sensors
- */
-void example4_pm_sensors() {
-  printf("=== Example 4: PM Sensors ===\n");
+static void example_batch_per_reading_masks(void) {
+  printf("=== Example: Batch (2 readings; per-reading masks) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5};
+  PayloadHeader header = {5};
   encoder.init(header);
 
-  SensorReading reading;
-  initSensorReading(&reading);
+  // Reading 1: temp
+  SensorReading r1;
+  initSensorReading(&r1);
+  setFlag(&r1, FLAG_TEMP);
+  r1.temp = 2500;
+  encoder.addReading(r1);
 
-  // PM2.5 = 12.5 µg/m³ (125 after scaling by 10)
-  setFlag(&reading, FLAG_PM_25);
-  reading.pm_25[0] = 125;
+  // Reading 2: co2
+  SensorReading r2;
+  initSensorReading(&r2);
+  setFlag(&r2, FLAG_CO2);
+  r2.co2 = 400;
+  encoder.addReading(r2);
 
-  // PM10 = 25.0 µg/m³ (250 after scaling by 10)
-  setFlag(&reading, FLAG_PM_10);
-  reading.pm_10[0] = 250;
-
-  encoder.addReading(reading);
-
-  uint8_t buffer[256];
+  uint8_t buffer[64];
   int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printHex("Encoded PM Sensor Payload", buffer, size);
+  printHex("Encoded Batch Payload", buffer, size);
+  printHeaderSummary(buffer, size);
 }
 
-/**
- * Example 5: All sensor types
- */
-void example5_all_sensors() {
-  printf("=== Example 5: Multiple Sensor Types ===\n");
+static void example_pm25_two_channel(void) {
+  printf("=== Example: PM2.5 Two-Channel (CH1 + CH2) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5};
+  PayloadHeader header = {5};
   encoder.init(header);
 
   SensorReading reading;
   initSensorReading(&reading);
 
-  // Temperature
-  setFlag(&reading, FLAG_TEMP);
-  reading.temp[0] = 2350; // 23.50°C
+  setFlag(&reading, FLAG_PM_25_CH1);
+  reading.pm_25[0] = 125; // 12.5 ug/m3 (scaled by 10)
 
-  // Humidity
-  setFlag(&reading, FLAG_HUM);
-  reading.hum[0] = 6500; // 65.00%
-
-  // CO2
-  setFlag(&reading, FLAG_CO2);
-  reading.co2 = 450;
-
-  // TVOC
-  setFlag(&reading, FLAG_TVOC);
-  reading.tvoc = 120;
-
-  // PM2.5
-  setFlag(&reading, FLAG_PM_25);
-  reading.pm_25[0] = 135; // 13.5 µg/m³
-
-  // Battery voltage = 3700 mV (scaled by 100)
-  setFlag(&reading, FLAG_VBAT);
-  reading.vbat = 3700;
+  setFlag(&reading, FLAG_PM_25_CH2);
+  reading.pm_25[1] = 135; // 13.5 ug/m3
 
   encoder.addReading(reading);
 
-  uint8_t buffer[256];
+  uint8_t buffer[64];
   int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printHex("Encoded Multi-Sensor Payload", buffer, size);
-
-  printf("Sensors included:\n");
-  printf("  - Temperature: 23.50°C\n");
-  printf("  - Humidity: 65.00%%\n");
-  printf("  - CO2: 450 ppm\n");
-  printf("  - TVOC: 120\n");
-  printf("  - PM2.5: 13.5 µg/m³\n");
-  printf("  - Battery: 3700 mV\n\n");
+  printHex("Encoded PM2.5 Payload", buffer, size);
+  printHeaderSummary(buffer, size);
 }
 
-/**
- * Example 6: Negative temperature
- */
-void example6_negative_temp() {
-  printf("=== Example 6: Negative Temperature ===\n");
+static void example_invalid_zero_mask(void) {
+  printf("=== Example: Invalid (zero presence mask) ===\n");
 
   PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5};
+  PayloadHeader header = {5};
   encoder.init(header);
 
   SensorReading reading;
   initSensorReading(&reading);
-
-  // Temperature = -15.25°C (-1525 after scaling)
-  setFlag(&reading, FLAG_TEMP);
-  reading.temp[0] = -1525;
-
+  // Intentionally DO NOT set any flags
+  reading.co2 = 400; // ignored
   encoder.addReading(reading);
 
-  uint8_t buffer[256];
+  uint8_t buffer[64];
   int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printHex("Encoded Negative Temperature", buffer, size);
-  printf("Temperature: -15.25°C\n\n");
+  printf("encode() returned: %d (expected -1)\n\n", (int)size);
 }
 
-/**
- * Example 7: Check buffer size before encoding
- */
-void example7_size_calculation() {
-  printf("=== Example 7: Size Calculation ===\n");
-
-  PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5};
-  encoder.init(header);
-
-  SensorReading reading;
-  initSensorReading(&reading);
-  setFlag(&reading, FLAG_TEMP);
-  setFlag(&reading, FLAG_HUM);
-  setFlag(&reading, FLAG_CO2);
-  reading.temp[0] = 2500;
-  reading.hum[0] = 6000;
-  reading.co2 = 400;
-
-  encoder.addReading(reading);
-
-  // Calculate size before encoding
-  uint32_t needed_size = encoder.calculateTotalSize();
-  printf("Calculated size needed: %u bytes\n", needed_size);
-
-  // Allocate appropriate buffer
-  uint8_t buffer[256];
-  int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printf("Actual encoded size: %d bytes\n", size);
-  printf("Match: %s\n\n", (size == (int32_t)needed_size) ? "YES" : "NO");
+static void printUsage(const char *argv0) {
+  printf("Usage: %s [example]\n", argv0);
+  printf("Examples:\n");
+  printf("  all         Run all examples (default)\n");
+  printf("  single      Single reading: Temp + CO2\n");
+  printf("  shared      Batch: 3 CO2 readings (shared mask)\n");
+  printf("  per-reading Batch: 2 readings with different masks\n");
+  printf("  pm25        Two-channel PM2.5 (CH1 + CH2)\n");
+  printf("  invalid     Zero-mask payload (encoder returns -1)\n");
 }
 
-/**
- * Example 8: Error handling
- */
-void example8_error_handling() {
-  printf("=== Example 8: Error Handling ===\n");
+int main(int argc, char **argv) {
+  const char *which = (argc >= 2) ? argv[1] : "all";
 
-  PayloadEncoder encoder;
-  PayloadHeader header = {1, false, false, 5};
-  encoder.init(header);
-
-  SensorReading reading;
-  initSensorReading(&reading);
-  setFlag(&reading, FLAG_CO2);
-  reading.co2 = 400;
-  encoder.addReading(reading);
-
-  // Try with buffer too small
-  uint8_t small_buffer[5];
-  int32_t size = encoder.encode(small_buffer, sizeof(small_buffer));
-
-  if (size == -1) {
-    printf("Error: Buffer too small (expected)\n");
+  if (strcmp(which, "all") == 0) {
+    example_single_temp_co2();
+    example_batch_shared_mask();
+    example_batch_per_reading_masks();
+    example_pm25_two_channel();
+    example_invalid_zero_mask();
+    return 0;
   }
 
-  // Try with proper buffer
-  uint8_t buffer[256];
-  size = encoder.encode(buffer, sizeof(buffer));
-
-  if (size > 0) {
-    printf("Success: Encoded %d bytes\n", size);
+  if (strcmp(which, "single") == 0) {
+    example_single_temp_co2();
+    return 0;
   }
 
-  printf("\n");
-}
+  if (strcmp(which, "shared") == 0) {
+    example_batch_shared_mask();
+    return 0;
+  }
 
-void example9_dedicated_temphum() {
-  printf("=== Example 9: Dedicated temperature humidity===\n");
+  if (strcmp(which, "per-reading") == 0) {
+    example_batch_per_reading_masks();
+    return 0;
+  }
 
-  PayloadEncoder encoder;
-  PayloadHeader header = {1, true, true, 5}; // Version 1, DUAL mode, dedicated temp/hum, 5 min
-  encoder.init(header);
+  if (strcmp(which, "pm25") == 0) {
+    example_pm25_two_channel();
+    return 0;
+  }
 
-  SensorReading reading;
-  initSensorReading(&reading);
+  if (strcmp(which, "invalid") == 0) {
+    example_invalid_zero_mask();
+    return 0;
+  }
 
-  // Temperature
-  setFlag(&reading, FLAG_TEMP);
-  reading.temp[0] = 2500; // 25.00°C
-
-  // Humidity
-  setFlag(&reading, FLAG_HUM);
-  reading.hum[0] = 6000; // 60.00%
-
-  // CO2 (scalar - only one value even in dual mode)
-  setFlag(&reading, FLAG_CO2);
-  reading.co2 = 425;
-
-  // PM2.5 AE (dual)
-  setFlag(&reading, FLAG_PM_25);
-  reading.pm_25[0] = 112;
-  reading.pm_25[1] = 193;
-
-  encoder.addReading(reading);
-
-  uint8_t buffer[256];
-  int32_t size = encoder.encode(buffer, sizeof(buffer));
-
-  printHex("Encoded Payload (Dual Mode & dedicated temp hum)", buffer, size);
-  printf("Note: Temperature and humidity only send 1 value\n");
-  printf("      CO2 is scalar, so only 1 value\n");
-  printf("      PM25 is dual since dual mode set \n\n");
-}
-
-int main() {
-  printf("╔═══════════════════════════════════════════════╗\n");
-  printf("║  AirGradient Cellular Payload Encoder        ║\n");
-  printf("║  Examples & Usage Demonstration              ║\n");
-  printf("╚═══════════════════════════════════════════════╝\n\n");
-
-  example1_single_reading();
-  example2_dual_channel();
-  example3_batch_readings();
-  example4_pm_sensors();
-  example5_all_sensors();
-  example6_negative_temp();
-  example7_size_calculation();
-  example8_error_handling();
-  example9_dedicated_temphum();
-
-  printf("╔═══════════════════════════════════════════════╗\n");
-  printf("║  All examples completed successfully!        ║\n");
-  printf("╚═══════════════════════════════════════════════╝\n");
-
-  return 0;
+  printUsage(argv[0]);
+  return 2;
 }
