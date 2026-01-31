@@ -1,5 +1,4 @@
-#include "../src/payload_encoder.h"
-#include "stdint.h"
+#include "payload_encoder.h"
 #include <stdio.h>
 #include <string.h>
 
