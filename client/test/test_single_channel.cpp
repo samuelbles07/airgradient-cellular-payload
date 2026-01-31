@@ -1,5 +1,6 @@
 #include "payload_encoder.h"
 #include "unity.h"
+#include <string.h>
 
 PayloadEncoder encoder;
 
@@ -12,6 +13,18 @@ void tearDown(void) {
 static PayloadHeader makeHeader(uint8_t interval_minutes) {
   PayloadHeader header = {interval_minutes};
   return header;
+}
+
+static void append_u16_le(uint8_t *buf, uint32_t *offset, uint16_t v) {
+  buf[(*offset)++] = (uint8_t)(v & 0xFF);
+  buf[(*offset)++] = (uint8_t)((v >> 8) & 0xFF);
+}
+
+static void append_u32_le(uint8_t *buf, uint32_t *offset, uint32_t v) {
+  buf[(*offset)++] = (uint8_t)(v & 0xFF);
+  buf[(*offset)++] = (uint8_t)((v >> 8) & 0xFF);
+  buf[(*offset)++] = (uint8_t)((v >> 16) & 0xFF);
+  buf[(*offset)++] = (uint8_t)((v >> 24) & 0xFF);
 }
 
 // Test: RFC example (Temp + CO2)
@@ -145,6 +158,105 @@ void test_encode_o3_we_32bit(void) {
   TEST_ASSERT_EQUAL_UINT8(0x12, buffer[13]);
 }
 
+void test_encode_all_flags_order_matches_presence_mask(void) {
+  encoder.init(makeHeader(5));
+
+  SensorReading reading;
+  initSensorReading(&reading);
+
+  for (uint8_t bit = 0; bit <= (uint8_t)FLAG_SIGNAL; bit++) {
+    setFlag(&reading, (SensorFlag)bit);
+  }
+
+  reading.temp = (int16_t)0x1122;
+  reading.hum = 0x3344;
+  reading.co2 = 0x5566;
+  reading.tvoc = 0x7788;
+  reading.tvoc_raw = 0x99AA;
+  reading.nox = 0xBBCC;
+  reading.nox_raw = 0xDDEE;
+
+  reading.pm_01 = 0x0102;
+  reading.pm_25[0] = 0x0304;
+  reading.pm_25[1] = 0x0506;
+  reading.pm_10 = 0x0708;
+  reading.pm_01_sp = 0x090A;
+  reading.pm_25_sp[0] = 0x0B0C;
+  reading.pm_25_sp[1] = 0x0D0E;
+  reading.pm_10_sp = 0x0F10;
+  reading.pm_03_pc[0] = 0x1112;
+  reading.pm_03_pc[1] = 0x1314;
+  reading.pm_05_pc = 0x1516;
+  reading.pm_01_pc = 0x1718;
+  reading.pm_25_pc = 0x191A;
+  reading.pm_5_pc = 0x1B1C;
+  reading.pm_10_pc = 0x1D1E;
+
+  reading.vbat = 0x1F20;
+  reading.vpanel = 0x2122;
+  reading.o3_we = 0xA1B2C3D4;
+  reading.o3_ae = 0xB1C2D3E4;
+  reading.no2_we = 0xC1D2E3F4;
+  reading.no2_ae = 0xD1E2F304;
+  reading.afe_temp = 0x2324;
+  reading.signal = -5;
+
+  encoder.addReading(reading);
+
+  uint8_t buffer[256];
+  int32_t size = encoder.encode(buffer, sizeof(buffer));
+
+  // Shared mode: 2 (header) + 8 (mask) + 67 (data) = 77
+  TEST_ASSERT_EQUAL_INT32(77, size);
+
+  // Mask bits 0..29 set => lo=0x3FFFFFFF, hi=0
+  TEST_ASSERT_EQUAL_UINT8(0xFF, buffer[2]);
+  TEST_ASSERT_EQUAL_UINT8(0xFF, buffer[3]);
+  TEST_ASSERT_EQUAL_UINT8(0xFF, buffer[4]);
+  TEST_ASSERT_EQUAL_UINT8(0x3F, buffer[5]);
+  TEST_ASSERT_EQUAL_UINT8(0x00, buffer[6]);
+  TEST_ASSERT_EQUAL_UINT8(0x00, buffer[7]);
+  TEST_ASSERT_EQUAL_UINT8(0x00, buffer[8]);
+  TEST_ASSERT_EQUAL_UINT8(0x00, buffer[9]);
+
+  uint8_t expected[80];
+  uint32_t off = 0;
+
+  append_u16_le(expected, &off, (uint16_t)reading.temp);
+  append_u16_le(expected, &off, reading.hum);
+  append_u16_le(expected, &off, reading.co2);
+  append_u16_le(expected, &off, reading.tvoc);
+  append_u16_le(expected, &off, reading.tvoc_raw);
+  append_u16_le(expected, &off, reading.nox);
+  append_u16_le(expected, &off, reading.nox_raw);
+  append_u16_le(expected, &off, reading.pm_01);
+  append_u16_le(expected, &off, reading.pm_25[0]);
+  append_u16_le(expected, &off, reading.pm_25[1]);
+  append_u16_le(expected, &off, reading.pm_10);
+  append_u16_le(expected, &off, reading.pm_01_sp);
+  append_u16_le(expected, &off, reading.pm_25_sp[0]);
+  append_u16_le(expected, &off, reading.pm_25_sp[1]);
+  append_u16_le(expected, &off, reading.pm_10_sp);
+  append_u16_le(expected, &off, reading.pm_03_pc[0]);
+  append_u16_le(expected, &off, reading.pm_03_pc[1]);
+  append_u16_le(expected, &off, reading.pm_05_pc);
+  append_u16_le(expected, &off, reading.pm_01_pc);
+  append_u16_le(expected, &off, reading.pm_25_pc);
+  append_u16_le(expected, &off, reading.pm_5_pc);
+  append_u16_le(expected, &off, reading.pm_10_pc);
+  append_u16_le(expected, &off, reading.vbat);
+  append_u16_le(expected, &off, reading.vpanel);
+  append_u32_le(expected, &off, reading.o3_we);
+  append_u32_le(expected, &off, reading.o3_ae);
+  append_u32_le(expected, &off, reading.no2_we);
+  append_u32_le(expected, &off, reading.no2_ae);
+  append_u16_le(expected, &off, reading.afe_temp);
+  expected[off++] = (uint8_t)reading.signal;
+
+  TEST_ASSERT_EQUAL_UINT32(67, off);
+  TEST_ASSERT_EQUAL_INT(0, memcmp(expected, &buffer[10], off));
+}
+
 int main(void) {
   UNITY_BEGIN();
 
@@ -152,6 +264,7 @@ int main(void) {
   RUN_TEST(test_encode_humidity_only);
   RUN_TEST(test_encode_pm25_two_channel);
   RUN_TEST(test_encode_o3_we_32bit);
+  RUN_TEST(test_encode_all_flags_order_matches_presence_mask);
 
   return UNITY_END();
 }
