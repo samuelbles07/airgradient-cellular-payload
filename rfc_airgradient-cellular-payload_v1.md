@@ -22,6 +22,8 @@ The new design is a binary payload format that reduce payload size, consistent a
 ## Payload Structure
 
 ```
+  Mode A (default): Presence mask per reading
+
   [ 1 Byte ] [ 1 Byte ] [ 4 Bytes ] [ Variable ] [ 4 Bytes ] [ Variable ] ...
   +----------+-----------+---------------+-------------+---------------+-------------+
   | Metadata | Interval  | Presence Mask | Sensor Data | Presence Mask | Sensor Data | ...
@@ -31,20 +33,35 @@ The new design is a binary payload format that reduce payload size, consistent a
        |          |              +-- Reading 1--+              +-- Reading 2--+  ...
        |          |
        +-- Shared header for all readings in this batch
+
+  Mode B: Shared presence mask (Metadata bit 5 = 1)
+
+  [ 1 Byte ] [ 1 Byte ] [ 4 Bytes ] [ Variable ] [ Variable ] [ Variable ] ...
+  +----------+-----------+-------------------+-------------+-------------+-------------+
+  | Metadata | Interval  | Shared Mask       | Sensor Data | Sensor Data | Sensor Data | ...
+  +----------+-----------+-------------------+-------------+-------------+-------------+
+       ^          ^              ^                   ^             ^
+       |          |              |                   |             |
+       |          |              +-- Applies to all readings -------+
+       |          |
+       +-- Shared header for all readings in this batch
 ```
 
 Batch header size: **2 bytes** (Metadata + Interval)
 
-Each reading starts with a **4-byte presence mask**, followed by sensor fields.
+If `SHARED_PRESENCE_MASK` is `0`, each reading starts with a **4-byte presence mask**, followed by sensor fields.
 
-> Presence mask and sensor data can be multiple times based on total cache
+If `SHARED_PRESENCE_MASK` is `1`, a single **4-byte shared presence mask** is sent once after the header, then all readings contain only sensor fields.
+
+> Presence mask and sensor data can be repeated based on total cache. If `SHARED_PRESENCE_MASK` is enabled, the presence mask is sent once for the whole batch.
 
 ### Byte 0: Metadata
 
 | **Bit Index** | **Name**                   | **Value** | **Description**                                                                                         |
 | ------------- | -------------------------- | --------- | ------------------------------------------------------------------------------------------------------- |
-| **0-3**       | `VERSION`                  | `0` - `15` | Payload Schema Version (e.g., set to 1).                                                               |
-| **4-7**       | `RESERVED`                 | `0`       | Reserved for future use.                                                                                |
+| **0-4**       | `VERSION`                  | `0` - `31` | Payload Schema Version (e.g., set to 0).                                                               |
+| **5**         | `SHARED_PRESENCE_MASK`     | `0` / `1` | **0:** Each reading includes a presence mask.<br><br>**1:** A single shared mask applies to all readings. |
+| **6-7**       | `RESERVED`                 | `0`       | Reserved for future use.                                                                                |
 
 ### Bytes 1: Interval
 
@@ -52,7 +69,10 @@ Measurement Interval in minutes
 
 ### Presence Mask (32-bit Integer)
 
-Each reading begins with a 32-bit presence mask (4 bytes, little-endian).
+Presence mask is a 32-bit integer (4 bytes, little-endian).
+
+- If `SHARED_PRESENCE_MASK` is `0`: each reading begins with its own presence mask.
+- If `SHARED_PRESENCE_MASK` is `1`: the payload contains a single shared presence mask immediately after the 2-byte header.
 
 This mask determines which data fields follow the header.
 
@@ -60,7 +80,7 @@ When a bit is set to `1`, the corresponding field is present in the payload and 
 
 | **Bit**   | **Flag Macro**          | **Data Type** | **Scale** | **Unit / Note**                |
 | --------- | --------------- | ------------- | --------- | ------------------------------ |
-| **0**     | `FLAG_TEMP`             | `int16_t`     | 100       | Celcius                        |
+| **0**     | `FLAG_TEMP`             | `int16_t`     | 100       | Celsius                        |
 | **1**     | `FLAG_HUM`              | `uint16_t`    | 100       | %                              |
 | **2**     | `FLAG_CO2`              | `uint16_t`    | 1         | ppm                            |
 | **3**     | `FLAG_TVOC`             | `uint16_t`    | 1         | Index Value                    |
@@ -98,12 +118,26 @@ When a bit is set to `1`, the corresponding field is present in the payload and 
 
 Data fields are serialized in **ascending order of their Presence Bit Index** in the Presence Mask.
 
+- If `SHARED_PRESENCE_MASK` is `0`, use the reading's own presence mask.
+- If `SHARED_PRESENCE_MASK` is `1`, use the shared presence mask for every reading.
+
 1. The parser checks **Bit 0**. If set (`1`), the data for `_temperature` is read first.
 2. The parser checks **Bit 1**. If set (`1`), the data for `_humidity` is read next.
 3. The parser continues this check sequentially up to **Bit 29**.
 4. If a **Bit** is set to `0` that field is skipped entirely (0 bytes on wire).
 
 **Crucial:** The position of a field in the payload depends entirely on which _previous_ bits were set.
+
+#### Reading Count (When Shared Presence Mask Is Enabled)
+
+When `SHARED_PRESENCE_MASK` is `1`, the number of readings is inferred from payload length:
+
+- `reading_data_size` = sum of byte sizes for all fields whose bits are set in the shared mask.
+- `reading_count` = `(payload_length - 2 - 4) / reading_data_size`
+
+The payload is invalid if the division is not an integer.
+
+The payload is also invalid if `reading_data_size` is `0` (shared mask has no fields).
 
 #### Two-Channel Fields
 
@@ -121,12 +155,12 @@ If both channel bits are set, both values are serialized (in ascending bit order
 
 ##### Single Values (Temp + CO2)
 
-- **Metadata:** `0x01` (Ver=1)
+- **Metadata:** `0x00` (Ver=0)
 - **Mask:** `0x00000005` (Bits 0 & 2 set: Temp + CO2)
 
 **Decoding Stream:**
 
-1. **Read Header:** Version is **1**.
+1. **Read Header:** Version is **0**.
 2. **Check Bit 0 (Temp):** Set.
     - Read 2 Bytes (`int16_t`). -> `Temp`
 3. **Check Bit 1 (Hum):** Not set. Skip.
@@ -136,14 +170,33 @@ If both channel bits are set, both values are serialized (in ascending bit order
 
 **Total Sensor Data Size:** 4 Bytes.
 
+##### Shared Presence Mask With Multiple Readings (Temp + CO2)
+
+- **Metadata:** `0x20` (Ver=0, Shared Mask=1)
+- **Shared Mask:** `0x00000005` (Bits 0 & 2 set: Temp + CO2)
+
+**Decoding Stream:**
+
+1. **Read Header:** Version is **0**, Shared Mask is **enabled**.
+2. **Read Shared Mask:** `0x00000005`.
+3. **Reading 1:**
+    - Temp: Read 2 Bytes (`int16_t`).
+    - CO2: Read 2 Bytes (`uint16_t`).
+4. **Reading 2:**
+    - Temp: Read 2 Bytes (`int16_t`).
+    - CO2: Read 2 Bytes (`uint16_t`).
+5. Continue until end of payload.
+
+**Per-Reading Sensor Data Size:** 4 Bytes.
+
 ##### Two-Channel PM2.5 Atmospheric (CH1 + CH2)
 
-- **Metadata:** `0x01` (Ver=1)
+- **Metadata:** `0x00` (Ver=0)
 - **Mask:** `0x00000300` (Bits 8 & 9 set: PM2.5 CH1 + PM2.5 CH2)
 
 **Decoding Stream:**
 
-1. **Read Header:** Version is **1**.
+1. **Read Header:** Version is **0**.
 2. ... skip Bits 0-7
 3. **Check Bit 8 (PM2.5 CH1):** Set.
     - Read 2 Bytes (`uint16_t`). -> `PM25_CH1`
