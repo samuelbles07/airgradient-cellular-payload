@@ -1,223 +1,71 @@
 /**
- * Example Usage - AirGradient Payload Decoder
- * How to use the decoder in your CoAP server
+ * Example Usage - AirGradient Payload Decoder (RFC v0)
+ * Run with: node src/example_usage.js
  */
 
 const { decodePayload, decodePayloadToJSON } = require('./payload_decoder');
 
-// ========================================
-// Example 1: Basic Usage
-// ========================================
-console.log('=== Example 1: Basic Decoding ===\n');
-
-// Simulated payload from CoAP request
-const payload = Buffer.from([
-  0x01,       // Version 1, Single mode
-  0x05,       // 5 minute interval
-  0x05, 0x00, 0x00, 0x00,  // Temp + CO2
-  0xC4, 0x09,              // 25.00°C
-  0x90, 0x01               // 400 ppm
-]);
-
-const decoded = decodePayload(payload);
-console.log('Decoded:', decoded);
-console.log('\n');
-
-// ========================================
-// Example 2: CoAP Server Integration
-// ========================================
-console.log('=== Example 2: CoAP Server Integration ===\n');
-
-/**
- * Example CoAP request handler
- */
-function handleCoapRequest(req, res) {
-  try {
-    // Get payload buffer from CoAP request
-    const payloadBuffer = req.payload;  // Buffer
-
-    // Decode the payload
-    const data = decodePayload(payloadBuffer);
-
-    console.log(`Received ${data.readingCount} reading(s)`);
-    console.log(`Version: ${data.header.version}`);
-    console.log(`Interval: ${data.header.intervalMinutes} minutes`);
-    console.log(`Dual Mode: ${data.header.dualMode}`);
-
-    // Process each reading
-    data.readings.forEach((reading, index) => {
-      console.log(`\nReading ${index + 1}:`);
-
-      if (reading.temperature !== undefined) {
-        console.log(`  Temperature: ${reading.temperature}°C`);
-      }
-      if (reading.humidity !== undefined) {
-        console.log(`  Humidity: ${reading.humidity}%`);
-      }
-      if (reading.co2 !== undefined) {
-        console.log(`  CO2: ${reading.co2} ppm`);
-      }
-      if (reading.pm25 !== undefined) {
-        console.log(`  PM2.5: ${reading.pm25} µg/m³`);
-      }
-      // ... check other sensors as needed
-    });
-
-    // Send response (example)
-    res.end('OK');
-
-    // Store to database, forward to API, etc.
-    // saveToDatabase(data);
-
-  } catch (error) {
-    console.error('Decode error:', error.message);
-    res.code = '4.00';  // Bad Request
-    res.end('Invalid payload');
-  }
+function mask64LE(lo, hi = 0) {
+  return Buffer.from([
+    lo & 0xFF,
+    (lo >>> 8) & 0xFF,
+    (lo >>> 16) & 0xFF,
+    (lo >>> 24) & 0xFF,
+    hi & 0xFF,
+    (hi >>> 8) & 0xFF,
+    (hi >>> 16) & 0xFF,
+    (hi >>> 24) & 0xFF
+  ]);
 }
 
-// Simulate handling a request
-const mockRequest = {
-  payload: Buffer.from([
-    0x01, 0x05,
-    0x05, 0x00, 0x00, 0x00,
-    0xC4, 0x09,
-    0x90, 0x01
-  ])
-};
+// Metadata:
+// - bits 0-4: version (0)
+// - bit 5: shared presence mask
+const META_SHARED = 0x20;
 
-const mockResponse = {
-  code: '2.05',
-  end: (msg) => console.log(`Response: ${msg}`)
-};
+console.log('=== Example 1: Shared Mask (Temp + CO2) ===');
+{
+  const payload = Buffer.concat([
+    Buffer.from([META_SHARED, 0x05]),
+    mask64LE(0x00000005),
+    Buffer.from([
+      0xC4, 0x09, // temp = 2500 => 25.00C
+      0x90, 0x01  // co2 = 400
+    ])
+  ]);
 
-handleCoapRequest(mockRequest, mockResponse);
-console.log('\n');
-
-// ========================================
-// Example 3: Batch Processing
-// ========================================
-console.log('=== Example 3: Batch Processing ===\n');
-
-const batchPayload = Buffer.from([
-  0x01, 0x05,
-  // Reading 1
-  0x04, 0x00, 0x00, 0x00,
-  0x90, 0x01,
-  // Reading 2
-  0x04, 0x00, 0x00, 0x00,
-  0x9A, 0x01,
-  // Reading 3
-  0x04, 0x00, 0x00, 0x00,
-  0xA4, 0x01
-]);
-
-const batchData = decodePayload(batchPayload);
-console.log(`Received batch of ${batchData.readingCount} readings`);
-
-batchData.readings.forEach((reading, idx) => {
-  console.log(`  Reading ${idx + 1}: CO2 = ${reading.co2} ppm`);
-});
-console.log('\n');
-
-// ========================================
-// Example 4: Extract Specific Sensors
-// ========================================
-console.log('=== Example 4: Extract Specific Sensors ===\n');
-
-function extractSensorValues(decodedPayload, sensorName) {
-  return decodedPayload.readings
-    .map(r => r[sensorName])
-    .filter(v => v !== undefined);
+  console.log(decodePayloadToJSON(payload, true));
 }
 
-const allCO2 = extractSensorValues(batchData, 'co2');
-console.log('All CO2 values:', allCO2);
+console.log('\n=== Example 2: Shared Mask Batch (3 CO2 readings) ===');
+{
+  const payload = Buffer.concat([
+    Buffer.from([META_SHARED, 0x05]),
+    mask64LE(0x00000004),
+    Buffer.from([
+      0x90, 0x01,
+      0x9A, 0x01,
+      0xA4, 0x01
+    ])
+  ]);
 
-const avgCO2 = allCO2.reduce((a, b) => a + b, 0) / allCO2.length;
-console.log(`Average CO2: ${avgCO2.toFixed(2)} ppm`);
-console.log('\n');
-
-// ========================================
-// Example 5: Convert to JSON for API
-// ========================================
-console.log('=== Example 5: JSON Output ===\n');
-
-const jsonOutput = decodePayloadToJSON(payload, true);
-console.log('JSON Output:');
-console.log(jsonOutput);
-console.log('\n');
-
-// ========================================
-// Example 6: Error Handling
-// ========================================
-console.log('=== Example 6: Error Handling ===\n');
-
-function safeDecodePayload(buffer) {
-  try {
-    return {
-      success: true,
-      data: decodePayload(buffer)
-    };
-  } catch (error) {
-    return {
-      success: false,
-      error: error.message
-    };
-  }
+  const decoded = decodePayload(payload);
+  console.log(`Reading count: ${decoded.readingCount}`);
+  console.log('CO2 values:', decoded.readings.map(r => r.co2));
 }
 
-// Valid payload
-const result1 = safeDecodePayload(payload);
-console.log('Valid payload:', result1.success);
+console.log('\n=== Example 3: Two-Channel PM2.5 (CH1 + CH2) ===');
+{
+  // bits 8 and 9
+  const payload = Buffer.concat([
+    Buffer.from([META_SHARED, 0x05]),
+    mask64LE(0x00000300),
+    Buffer.from([
+      0x7D, 0x00, // pm25_ch1 = 125 => 12.5
+      0x87, 0x00  // pm25_ch2 = 135 => 13.5
+    ])
+  ]);
 
-// Invalid payload (too short)
-const result2 = safeDecodePayload(Buffer.from([0x01]));
-console.log('Invalid payload:', result2.success, '-', result2.error);
-console.log('\n');
-
-// ========================================
-// Example 7: Working with Dual Channel
-// ========================================
-console.log('=== Example 7: Dual Channel Data ===\n');
-
-const dualPayload = Buffer.from([
-  0x09, 0x05,  // Dual mode
-  0x03, 0x00, 0x00, 0x00,  // Temp + Humidity
-  0xC4, 0x09,  // Temp[0]
-  0x28, 0x0A,  // Temp[1]
-  0x70, 0x17,  // Hum[0]
-  0xCE, 0x17   // Hum[1]
-]);
-
-const dualData = decodePayload(dualPayload);
-const reading = dualData.readings[0];
-
-if (Array.isArray(reading.temperature)) {
-  console.log(`Temperature (dual): ${reading.temperature[0]}°C / ${reading.temperature[1]}°C`);
-  console.log(`Humidity (dual): ${reading.humidity[0]}% / ${reading.humidity[1]}%`);
-} else {
-  console.log(`Temperature (single): ${reading.temperature}°C`);
+  const decoded = decodePayload(payload);
+  console.log(decoded.readings[0]);
 }
-console.log('\n');
-
-// ========================================
-// Example 8: Working with Dual Channel + Dedicated Temp hum
-// ========================================
-console.log('=== Example 8: Dual Channel Data + Dedicated Temp hum from client example output===\n');
-
-// 19 05 07 01 00 00 C4 09 70 17 A9 01 70 00 C1 00
-const dualPayload2 = Buffer.from([
-  0x19, 0x05,  // Dual mode with dedicated sensor
-  0x07, 0x01, 0x00, 0x00, // ....
-  0xC4, 0x09,  // Temp
-  0x70, 0x17,  // Hum
-  0xA9, 0x01,   // CO2
-  0x70, 0x00,   // PM_25 AE [0]
-  0xC1, 0x00,   // PM_25 AE [1]
-]);
-
-console.log(decodePayloadToJSON(dualPayload2, true));
-console.log('\n');
-
-console.log('=== Examples Complete ===');

@@ -8,38 +8,26 @@ const { SensorFlag, SensorFieldNames, SensorInfo } = require('./payload_types');
 /**
  * Decode metadata byte (byte 0)
  * @param {number} metadata - Metadata byte
- * @returns {Object} { version, dualMode, dedicatedTempHumSensor }
+ * @returns {Object} { version, sharedPresenceMask }
  */
 function decodeMetadata(metadata) {
-  const version = metadata & 0x07;  // Bits 0-2
-  const dualMode = (metadata & 0x08) !== 0;  // Bit 3
-  const dedicatedTempHumSensor = (metadata & 0x10) !== 0;  // Bit 4
-  return { version, dualMode, dedicatedTempHumSensor };
+  const version = metadata & 0x1F; // Bits 0-4
+  const sharedPresenceMask = (metadata & 0x20) !== 0; // Bit 5
+  return { version, sharedPresenceMask };
 }
 
 /**
- * Check if a flag is set in the presence mask
- * @param {number} mask - 32-bit presence mask
- * @param {number} flag - Flag bit position (0-26)
+ * Check if a bit is set in a 64-bit presence mask.
+ * Mask is represented as two 32-bit words ({ lo, hi }).
+ * @param {{lo:number, hi:number}} mask
+ * @param {number} bit
  * @returns {boolean}
  */
-function isFlagSet(mask, flag) {
-  return (mask & (1 << flag)) !== 0;
-}
-
-/**
- * Check if a sensor field is expandable (sends 2 values in dual mode)
- * @param {number} flag - Sensor flag
- * @param {boolean} dedicatedTempHumSensor - Dedicated temp/hum sensor flag
- * @returns {boolean}
- */
-function isExpandable(flag, dedicatedTempHumSensor) {
-  // Temp/Hum are NOT expandable if dedicated sensor is used
-  if ((flag === SensorFlag.FLAG_TEMP || flag === SensorFlag.FLAG_HUM) && dedicatedTempHumSensor) {
-    return false;
+function isBitSet64(mask, bit) {
+  if (bit < 32) {
+    return ((mask.lo >>> bit) & 1) !== 0;
   }
-  const info = SensorInfo[flag];
-  return info ? info.expandable : false;
+  return ((mask.hi >>> (bit - 32)) & 1) !== 0;
 }
 
 /**
@@ -83,41 +71,44 @@ function readInt8(buffer, offset) {
 }
 
 /**
- * Read presence mask from buffer (32-bit little-endian)
+ * Read presence mask from buffer (64-bit little-endian)
  * @param {Buffer} buffer - Buffer to read from
  * @param {number} offset - Offset to read at
- * @returns {number}
+ * @returns {{lo:number, hi:number}}
  */
 function readPresenceMask(buffer, offset) {
-  return readUint32LE(buffer, offset);
+  return {
+    lo: readUint32LE(buffer, offset),
+    hi: readUint32LE(buffer, offset + 4)
+  };
 }
 
 /**
  * Decode sensor data based on presence mask
  * @param {Buffer} buffer - Buffer containing sensor data
  * @param {number} offset - Starting offset
- * @param {number} presenceMask - 32-bit presence mask
- * @param {boolean} dualMode - Dual channel mode flag
- * @param {boolean} dedicatedTempHumSensor - Dedicated temp/hum sensor flag
+ * @param {{lo:number, hi:number}} presenceMask - 64-bit presence mask
  * @param {boolean} applyScaling - Apply scaling factors to values
  * @returns {Object} { data, bytesRead }
  */
-function decodeSensorData(buffer, offset, presenceMask, dualMode, dedicatedTempHumSensor, applyScaling = true) {
+function decodeSensorData(buffer, offset, presenceMask, applyScaling = true) {
   let currentOffset = offset;
   const data = {};
 
-  // Iterate through flags in order (0-26)
+  // Iterate through flags in ascending order
   for (let flag = 0; flag <= SensorFlag.FLAG_SIGNAL; flag++) {
-    if (!isFlagSet(presenceMask, flag)) {
+    if (!isBitSet64(presenceMask, flag)) {
       continue;  // Skip if flag not set
     }
 
     const fieldName = SensorFieldNames[flag];
     const info = SensorInfo[flag];
-    const expandable = isExpandable(flag, dedicatedTempHumSensor);
-    const valueCount = (expandable && dualMode) ? 2 : 1;
 
-    // Read value(s) based on type
+    if (!fieldName || !info) {
+      throw new Error(`Unknown sensor flag ${flag}`);
+    }
+
+    // Read value based on type
     if (info.type === 'int8') {
       // Signed 8-bit (signal strength)
       const rawValue = readInt8(buffer, currentOffset);
@@ -130,22 +121,14 @@ function decodeSensorData(buffer, offset, presenceMask, dualMode, dedicatedTempH
       currentOffset += 4;
     } else if (info.type === 'int16') {
       // Signed 16-bit (temperature)
-      const values = [];
-      for (let i = 0; i < valueCount; i++) {
-        const rawValue = readInt16LE(buffer, currentOffset);
-        values.push(applyScaling ? rawValue / info.scale : rawValue);
-        currentOffset += 2;
-      }
-      data[fieldName] = valueCount === 1 ? values[0] : values;
+      const rawValue = readInt16LE(buffer, currentOffset);
+      data[fieldName] = applyScaling ? rawValue / info.scale : rawValue;
+      currentOffset += 2;
     } else {
       // Unsigned 16-bit
-      const values = [];
-      for (let i = 0; i < valueCount; i++) {
-        const rawValue = readUint16LE(buffer, currentOffset);
-        values.push(applyScaling ? rawValue / info.scale : rawValue);
-        currentOffset += 2;
-      }
-      data[fieldName] = valueCount === 1 ? values[0] : values;
+      const rawValue = readUint16LE(buffer, currentOffset);
+      data[fieldName] = applyScaling ? rawValue / info.scale : rawValue;
+      currentOffset += 2;
     }
   }
 
@@ -159,25 +142,21 @@ function decodeSensorData(buffer, offset, presenceMask, dualMode, dedicatedTempH
  * Decode a single reading (presence mask + sensor data)
  * @param {Buffer} buffer - Buffer to decode
  * @param {number} offset - Starting offset
- * @param {boolean} dualMode - Dual channel mode
- * @param {boolean} dedicatedTempHumSensor - Dedicated temp/hum sensor flag
  * @param {boolean} applyScaling - Apply scaling factors
  * @returns {Object} { reading, bytesRead }
  */
-function decodeReading(buffer, offset, dualMode, dedicatedTempHumSensor, applyScaling = true) {
+function decodeReading(buffer, offset, applyScaling = true) {
   let currentOffset = offset;
 
-  // Read presence mask (4 bytes)
+  // Read presence mask (8 bytes)
   const presenceMask = readPresenceMask(buffer, currentOffset);
-  currentOffset += 4;
+  currentOffset += 8;
 
   // Decode sensor data
   const { data, bytesRead } = decodeSensorData(
     buffer,
     currentOffset,
     presenceMask,
-    dualMode,
-    dedicatedTempHumSensor,
     applyScaling
   );
   currentOffset += bytesRead;
@@ -189,6 +168,27 @@ function decodeReading(buffer, offset, dualMode, dedicatedTempHumSensor, applySc
     },
     bytesRead: currentOffset - offset
   };
+}
+
+function calculateSensorDataSizeForMask(presenceMask) {
+  let size = 0;
+  for (let flag = 0; flag <= SensorFlag.FLAG_SIGNAL; flag++) {
+    if (!isBitSet64(presenceMask, flag)) {
+      continue;
+    }
+    const info = SensorInfo[flag];
+    if (!info) {
+      throw new Error(`Unknown sensor flag ${flag}`);
+    }
+    if (info.type === 'int8') {
+      size += 1;
+    } else if (info.type === 'uint32') {
+      size += 4;
+    } else {
+      size += 2;
+    }
+  }
+  return size;
 }
 
 /**
@@ -212,21 +212,56 @@ function decodePayload(buffer, applyScaling = true) {
   const metadata = buffer[offset++];
   const intervalMinutes = buffer[offset++];
 
-  const { version, dualMode, dedicatedTempHumSensor } = decodeMetadata(metadata);
+  const { version, sharedPresenceMask } = decodeMetadata(metadata);
+
+  if (version !== 0) {
+    throw new Error(`Unsupported payload version: ${version}`);
+  }
 
   const header = {
     version,
-    dualMode,
-    dedicatedTempHumSensor,
+    sharedPresenceMask,
     intervalMinutes
   };
 
-  // Decode all readings
   const readings = [];
-  while (offset < buffer.length) {
-    const { reading, bytesRead } = decodeReading(buffer, offset, dualMode, dedicatedTempHumSensor, applyScaling);
-    readings.push(reading);
-    offset += bytesRead;
+
+  if (sharedPresenceMask) {
+    if (buffer.length < 2 + 8) {
+      throw new Error('Buffer too small for shared presence mask');
+    }
+
+    const sharedMask = readPresenceMask(buffer, offset);
+    offset += 8;
+
+    const readingDataSize = calculateSensorDataSizeForMask(sharedMask);
+    if (readingDataSize === 0) {
+      throw new Error('Shared presence mask has no fields');
+    }
+
+    const remaining = buffer.length - offset;
+    if (remaining % readingDataSize !== 0) {
+      throw new Error('Invalid payload length for shared presence mask');
+    }
+
+    const readingCount = remaining / readingDataSize;
+    for (let i = 0; i < readingCount; i++) {
+      const { data, bytesRead } = decodeSensorData(buffer, offset, sharedMask, applyScaling);
+      if (bytesRead !== readingDataSize) {
+        throw new Error('Internal error: decoded size mismatch');
+      }
+      readings.push({
+        presenceMask: sharedMask,
+        ...data
+      });
+      offset += bytesRead;
+    }
+  } else {
+    while (offset < buffer.length) {
+      const { reading, bytesRead } = decodeReading(buffer, offset, applyScaling);
+      readings.push(reading);
+      offset += bytesRead;
+    }
   }
 
   return {
@@ -259,8 +294,7 @@ function decodePayloadToJSON(buffer, pretty = false) {
 // Export all functions
 module.exports = {
   decodeMetadata,
-  isFlagSet,
-  isExpandable,
+  isBitSet64,
   readUint16LE,
   readInt16LE,
   readUint32LE,

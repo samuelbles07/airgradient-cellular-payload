@@ -1,211 +1,174 @@
 /**
- * Test file for AirGradient Payload Decoder
- * Run with: node test_decoder.js
+ * Tests for AirGradient Payload Decoder
+ * Run with: node src/test_decoder.js
  */
 
-const { decodePayload, decodePayloadToJSON } = require('./payload_decoder');
+const assert = require("assert");
+const { decodePayload } = require("./payload_decoder");
 
-// Test 1: RFC Example - Single Channel (Temp + CO2)
-console.log('=== Test 1: RFC Example - Single Channel ===');
-const test1Buffer = Buffer.from([
-  0x01,       // Metadata (Version=1, Dual=0)
-  0x05,       // Interval (5 minutes)
-  0x05, 0x00, 0x00, 0x00,  // Presence Mask (bits 0, 2)
-  0xC4, 0x09,              // Temp = 2500 (25.00°C)
-  0x90, 0x01               // CO2 = 400 ppm
-]);
+function mask64LE(lo, hi = 0) {
+  return [
+    lo & 0xff,
+    (lo >>> 8) & 0xff,
+    (lo >>> 16) & 0xff,
+    (lo >>> 24) & 0xff,
+    hi & 0xff,
+    (hi >>> 8) & 0xff,
+    (hi >>> 16) & 0xff,
+    (hi >>> 24) & 0xff,
+  ];
+}
 
-const result1 = decodePayload(test1Buffer);
-console.log(JSON.stringify(result1, null, 2));
-console.log('Expected: version=1, dualMode=false, interval=5, temp=25, co2=400');
-console.log('');
+function approxEqual(a, b, eps = 1e-9) {
+  return Math.abs(a - b) <= eps;
+}
 
-// Test 2: RFC Example - Dual Channel (Temp + CO2)
-console.log('=== Test 2: RFC Example - Dual Channel ===');
-const test2Buffer = Buffer.from([
-  0x09,       // Metadata (Version=1, Dual=1)
-  0x05,       // Interval (5 minutes)
-  0x05, 0x00, 0x00, 0x00,  // Presence Mask (bits 0, 2)
-  0xC4, 0x09,              // Temp[0] = 2500 (25.00°C)
-  0x28, 0x0A,              // Temp[1] = 2600 (26.00°C)
-  0x90, 0x01               // CO2 = 400 ppm
-]);
+// Metadata byte layout:
+// - bits 0-4: version (0)
+// - bit 5: shared presence mask
+const META_SHARED = 0x20;
+const META_PER_READING = 0x00;
 
-const result2 = decodePayload(test2Buffer);
-console.log(JSON.stringify(result2, null, 2));
-console.log('Expected: version=1, dualMode=true, interval=5, temp=[25, 26], co2=400');
-console.log('');
+// Test 1: Shared mask, single reading (Temp + CO2)
+{
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x00000005),
+    0xc4,
+    0x09,
+    0x90,
+    0x01,
+  ]);
 
-// Test 3: Multiple Readings - Single Channel
-console.log('=== Test 3: Multiple Readings - Single Channel ===');
-const test3Buffer = Buffer.from([
-  0x01,       // Metadata (Version=1, Dual=0)
-  0x05,       // Interval (5 minutes)
-  // Reading 1
-  0x05, 0x00, 0x00, 0x00,  // Presence Mask (bits 0, 2)
-  0xC4, 0x09,              // Temp = 2500 (25.00°C)
-  0x90, 0x01,              // CO2 = 400 ppm
-  // Reading 2
-  0x05, 0x00, 0x00, 0x00,  // Presence Mask (bits 0, 2)
-  0x28, 0x0A,              // Temp = 2600 (26.00°C)
-  0x9A, 0x01               // CO2 = 410 ppm
-]);
+  const decoded = decodePayload(buffer);
 
-const result3 = decodePayload(test3Buffer);
-console.log(JSON.stringify(result3, null, 2));
-console.log('Expected: 2 readings with different values');
-console.log('');
+  assert.strictEqual(decoded.header.version, 0);
+  assert.strictEqual(decoded.header.sharedPresenceMask, true);
+  assert.strictEqual(decoded.header.intervalMinutes, 5);
+  assert.strictEqual(decoded.readingCount, 1);
+  assert.strictEqual(decoded.readings[0].temperature, 25);
+  assert.strictEqual(decoded.readings[0].co2, 400);
+}
 
-// Test 4: Humidity only
-console.log('=== Test 4: Humidity Only ===');
-const test4Buffer = Buffer.from([
-  0x01,       // Metadata
-  0x0A,       // Interval (10 minutes)
-  0x02, 0x00, 0x00, 0x00,  // Presence Mask (bit 1 = humidity)
-  0x96, 0x19               // Humidity = 6550 (65.50%)
-]);
+// Test 2: Shared mask, 3 readings (CO2 only)
+{
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x00000004),
+    0x90,
+    0x01,
+    0x9a,
+    0x01,
+    0xa4,
+    0x01,
+  ]);
 
-const result4 = decodePayload(test4Buffer);
-console.log(JSON.stringify(result4, null, 2));
-console.log('Expected: humidity=65.5');
-console.log('');
+  const decoded = decodePayload(buffer);
 
-// Test 5: PM2.5 sensor
-console.log('=== Test 5: PM2.5 Sensor ===');
-const test5Buffer = Buffer.from([
-  0x01,       // Metadata
-  0x05,       // Interval
-  0x00, 0x01, 0x00, 0x00,  // Presence Mask (bit 8 = PM2.5)
-  0x7D, 0x00               // PM2.5 = 125 (12.5 µg/m³)
-]);
+  assert.strictEqual(decoded.header.sharedPresenceMask, true);
+  assert.strictEqual(decoded.readingCount, 3);
+  assert.deepStrictEqual(
+    decoded.readings.map((r) => r.co2),
+    [400, 410, 420],
+  );
+}
 
-const result5 = decodePayload(test5Buffer);
-console.log(JSON.stringify(result5, null, 2));
-console.log('Expected: pm25=12.5');
-console.log('');
+// Test 3: Per-reading masks, 2 readings with different masks
+{
+  const buffer = Buffer.from([
+    META_PER_READING,
+    0x05,
+    // Reading 1: temp
+    ...mask64LE(0x00000001),
+    0xc4,
+    0x09,
+    // Reading 2: co2
+    ...mask64LE(0x00000004),
+    0x90,
+    0x01,
+  ]);
 
-// Test 6: 32-bit field (O3_WE)
-console.log('=== Test 6: 32-bit Field (O3 Working Electrode) ===');
-const test6Buffer = Buffer.from([
-  0x01,       // Metadata
-  0x05,       // Interval
-  0x00, 0x00, 0x20, 0x00,  // Presence Mask (bit 21 = O3_WE)
-  0x78, 0x56, 0x34, 0x12   // O3_WE = 0x12345678
-]);
+  const decoded = decodePayload(buffer);
 
-const result6 = decodePayload(test6Buffer);
-console.log(JSON.stringify(result6, null, 2));
-console.log('Expected: o3_we=305419.896 (0x12345678 / 1000)');
-console.log('');
+  assert.strictEqual(decoded.header.sharedPresenceMask, false);
+  assert.strictEqual(decoded.readingCount, 2);
+  assert.strictEqual(decoded.readings[0].temperature, 25);
+  assert.strictEqual(decoded.readings[1].co2, 400);
+}
 
-// Test 7: Negative temperature
-console.log('=== Test 7: Negative Temperature ===');
-const test7Buffer = Buffer.from([
-  0x01,       // Metadata
-  0x05,       // Interval
-  0x01, 0x00, 0x00, 0x00,  // Presence Mask (bit 0 = temp)
-  0xE6, 0xFB               // Temp = -1050 (-10.50°C)
-]);
+// Test 4: Shared mask, PM2.5 two-channel flags
+{
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x00000300),
+    0x7d,
+    0x00,
+    0x87,
+    0x00,
+  ]);
 
-const result7 = decodePayload(test7Buffer);
-console.log(JSON.stringify(result7, null, 2));
-console.log('Expected: temperature=-10.5');
-console.log('');
+  const decoded = decodePayload(buffer);
+  assert.strictEqual(decoded.readingCount, 1);
+  assert.strictEqual(decoded.readings[0].pm25_ch1, 12.5);
+  assert.strictEqual(decoded.readings[0].pm25_ch2, 13.5);
+}
 
-// Test 8: Multiple sensors in single reading
-console.log('=== Test 8: Multiple Sensors ===');
-const test8Buffer = Buffer.from([
-  0x01,       // Metadata
-  0x05,       // Interval
-  0x0F, 0x00, 0x00, 0x00,  // Presence Mask (bits 0,1,2,3 = temp,hum,co2,tvoc)
-  0xC4, 0x09,              // Temp = 2500
-  0x70, 0x17,              // Hum = 6000
-  0x90, 0x01,              // CO2 = 400
-  0x64, 0x00               // TVOC = 100
-]);
+// Test 5: Ordering (Temp, Hum, CO2) must follow ascending bit index
+// Mask bits 0,1,2 set => values must come as temp, hum, co2.
+{
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x00000007),
+    // temp = 0x09C4 (2500 -> 25.00)
+    0xc4,
+    0x09,
+    // hum = 0x1770 (6000 -> 60.00)
+    0x70,
+    0x17,
+    // co2 = 0x0190 (400)
+    0x90,
+    0x01,
+  ]);
 
-const result8 = decodePayload(test8Buffer);
-console.log(JSON.stringify(result8, null, 2));
-console.log('Expected: temp=25, hum=60, co2=400, tvoc=100');
-console.log('');
+  const decoded = decodePayload(buffer);
+  assert.strictEqual(decoded.readings[0].temperature, 25);
+  assert.strictEqual(decoded.readings[0].humidity, 60);
+  assert.strictEqual(decoded.readings[0].co2, 400);
+}
 
-// Test 9: Dual mode with expandable and scalar mix
-console.log('=== Test 9: Dual Mode - Mixed Fields ===');
-const test9Buffer = Buffer.from([
-  0x09,       // Metadata (Dual=1)
-  0x05,       // Interval
-  0x07, 0x00, 0x00, 0x00,  // Presence Mask (bits 0,1,2 = temp,hum,co2)
-  0xC4, 0x09,              // Temp[0] = 2500
-  0x28, 0x0A,              // Temp[1] = 2600
-  0x70, 0x17,              // Hum[0] = 6000
-  0xCE, 0x17,              // Hum[1] = 6094
-  0x90, 0x01               // CO2 = 400 (scalar, only 1 value)
-]);
+// Test 6: Shared mask, 32-bit field (O3_WE)
+{
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x01000000),
+    0x78,
+    0x56,
+    0x34,
+    0x12,
+  ]);
 
-const result9 = decodePayload(test9Buffer);
-console.log(JSON.stringify(result9, null, 2));
-console.log('Expected: temp=[25,26], hum=[60,60.94], co2=400');
-console.log('');
+  const decoded = decodePayload(buffer);
+  assert.strictEqual(decoded.readingCount, 1);
+  assert.ok(approxEqual(decoded.readings[0].o3_we, 0x12345678 / 1000));
+}
 
-// Test 10: FLAG_SIGNAL (new sensor - bit 26)
-console.log('=== Test 10: Signal Strength (FLAG_SIGNAL) ===');
-const test10Buffer = Buffer.from([
-  0x01,       // Metadata (Version=1, Dual=0)
-  0x05,       // Interval (5 minutes)
-  0x00, 0x00, 0x00, 0x04,  // Presence Mask (bit 26 = signal)
-  0xB5                     // Signal = -75 dBm (two's complement)
-]);
+// Test 7: Shared mask, signal (int8)
+{
+  // bit 29 => 0x20000000
+  const buffer = Buffer.from([
+    META_SHARED,
+    0x05,
+    ...mask64LE(0x20000000),
+    0xb5,
+  ]);
 
-const result10 = decodePayload(test10Buffer);
-console.log(JSON.stringify(result10, null, 2));
-console.log('Expected: signal=-75 (dBm)');
-console.log('');
+  const decoded = decodePayload(buffer);
+  assert.strictEqual(decoded.readings[0].signal, -75);
+}
 
-// Test 11: DEDICATED_TEMPHUM_SENSOR flag (bit 4 in metadata)
-console.log('=== Test 11: Dedicated Temp/Hum Sensor (Bit 4) ===');
-const test11Buffer = Buffer.from([
-  0x19,       // Metadata (Version=1, Dual=1, Dedicated=1) = 0001 1001
-  0x05,       // Interval (5 minutes)
-  0x03, 0x01, 0x00, 0x00,  // Presence Mask (bits 0,1,8 = temp,hum,pm25)
-  0xC4, 0x09,              // Temp (single value, even in dual mode)
-  0x70, 0x17,              // Hum (single value, even in dual mode)
-  0x7D, 0x00,              // PM25[0] = 125 (still dual)
-  0x87, 0x00               // PM25[1] = 135 (still dual)
-]);
-
-const result11 = decodePayload(test11Buffer);
-console.log(JSON.stringify(result11, null, 2));
-console.log('Expected: dedicatedTempHumSensor=true, temp=25 (single), hum=60 (single), pm25=[12.5, 13.5] (dual)');
-console.log('');
-
-// Test 12: AFE_TEMP with new uint16 type (changed from uint32)
-console.log('=== Test 12: AFE Temperature (uint16) ===');
-const test12Buffer = Buffer.from([
-  0x01,       // Metadata (Version=1, Dual=0)
-  0x05,       // Interval (5 minutes)
-  0x00, 0x00, 0x00, 0x02,  // Presence Mask (bit 25 = AFE_TEMP)
-  0xFA, 0x00               // AFE_TEMP = 250 (25.0°C) - now 2 bytes instead of 4
-]);
-
-const result12 = decodePayload(test12Buffer);
-console.log(JSON.stringify(result12, null, 2));
-console.log('Expected: afe_temp=25.0 (°C)');
-console.log('');
-
-// Test 13: Combined test - Signal + Dedicated Sensor
-console.log('=== Test 13: Signal + Temp/Hum with Dedicated Sensor ===');
-const test13Buffer = Buffer.from([
-  0x19,       // Metadata (Version=1, Dual=1, Dedicated=1)
-  0x05,       // Interval (5 minutes)
-  0x03, 0x00, 0x00, 0x04,  // Presence Mask (bits 0,1,26 = temp,hum,signal)
-  0xC4, 0x09,              // Temp (single value)
-  0x70, 0x17,              // Hum (single value)
-  0xB5                     // Signal = -75 dBm
-]);
-
-const result13 = decodePayload(test13Buffer);
-console.log(JSON.stringify(result13, null, 2));
-console.log('Expected: dedicatedTempHumSensor=true, temp=25, hum=60, signal=-75');
-console.log('');
-
-console.log('=== All Tests Complete ===');
+console.log("All tests passed");
