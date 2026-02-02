@@ -3,7 +3,7 @@
  * Decodes binary payload format for cellular transmission
  */
 
-const { SensorFlag, SensorFieldNames, SensorInfo } = require('./payload_types');
+const { SensorFlag, SensorFieldNames, SensorInfo } = require("./payload_types");
 
 /**
  * Decode metadata byte (byte 0)
@@ -11,7 +11,7 @@ const { SensorFlag, SensorFieldNames, SensorInfo } = require('./payload_types');
  * @returns {Object} { version, sharedPresenceMask }
  */
 function decodeMetadata(metadata) {
-  const version = metadata & 0x1F; // Bits 0-4
+  const version = metadata & 0x1f; // Bits 0-4
   const sharedPresenceMask = (metadata & 0x20) !== 0; // Bit 5
   return { version, sharedPresenceMask };
 }
@@ -79,7 +79,7 @@ function readInt8(buffer, offset) {
 function readPresenceMask(buffer, offset) {
   return {
     lo: readUint32LE(buffer, offset),
-    hi: readUint32LE(buffer, offset + 4)
+    hi: readUint32LE(buffer, offset + 4),
   };
 }
 
@@ -98,7 +98,7 @@ function decodeSensorData(buffer, offset, presenceMask, applyScaling = true) {
   // Iterate through flags in ascending order
   for (let flag = 0; flag <= SensorFlag.FLAG_SIGNAL; flag++) {
     if (!isBitSet64(presenceMask, flag)) {
-      continue;  // Skip if flag not set
+      continue; // Skip if flag not set
     }
 
     const fieldName = SensorFieldNames[flag];
@@ -109,17 +109,17 @@ function decodeSensorData(buffer, offset, presenceMask, applyScaling = true) {
     }
 
     // Read value based on type
-    if (info.type === 'int8') {
+    if (info.type === "int8") {
       // Signed 8-bit (signal strength)
       const rawValue = readInt8(buffer, currentOffset);
       data[fieldName] = applyScaling ? rawValue / info.scale : rawValue;
       currentOffset += 1;
-    } else if (info.type === 'uint32') {
+    } else if (info.type === "uint32") {
       // 32-bit fields (always scalar)
       const rawValue = readUint32LE(buffer, currentOffset);
       data[fieldName] = applyScaling ? rawValue / info.scale : rawValue;
       currentOffset += 4;
-    } else if (info.type === 'int16') {
+    } else if (info.type === "int16") {
       // Signed 16-bit (temperature)
       const rawValue = readInt16LE(buffer, currentOffset);
       data[fieldName] = applyScaling ? rawValue / info.scale : rawValue;
@@ -134,7 +134,7 @@ function decodeSensorData(buffer, offset, presenceMask, applyScaling = true) {
 
   return {
     data,
-    bytesRead: currentOffset - offset
+    bytesRead: currentOffset - offset,
   };
 }
 
@@ -157,16 +157,16 @@ function decodeReading(buffer, offset, applyScaling = true) {
     buffer,
     currentOffset,
     presenceMask,
-    applyScaling
+    applyScaling,
   );
   currentOffset += bytesRead;
 
   return {
     reading: {
       presenceMask,
-      ...data
+      ...data,
     },
-    bytesRead: currentOffset - offset
+    bytesRead: currentOffset - offset,
   };
 }
 
@@ -180,9 +180,9 @@ function calculateSensorDataSizeForMask(presenceMask) {
     if (!info) {
       throw new Error(`Unknown sensor flag ${flag}`);
     }
-    if (info.type === 'int8') {
+    if (info.type === "int8") {
       size += 1;
-    } else if (info.type === 'uint32') {
+    } else if (info.type === "uint32") {
       size += 4;
     } else {
       size += 2;
@@ -199,11 +199,11 @@ function calculateSensorDataSizeForMask(presenceMask) {
  */
 function decodePayload(buffer, applyScaling = true) {
   if (!Buffer.isBuffer(buffer)) {
-    throw new Error('Input must be a Buffer');
+    throw new Error("Input must be a Buffer");
   }
 
   if (buffer.length < 2) {
-    throw new Error('Buffer too small (minimum 2 bytes for header)');
+    throw new Error("Buffer too small (minimum 2 bytes for header)");
   }
 
   let offset = 0;
@@ -221,14 +221,14 @@ function decodePayload(buffer, applyScaling = true) {
   const header = {
     version,
     sharedPresenceMask,
-    intervalMinutes
+    intervalMinutes,
   };
 
   const readings = [];
 
   if (sharedPresenceMask) {
     if (buffer.length < 2 + 8) {
-      throw new Error('Buffer too small for shared presence mask');
+      throw new Error("Buffer too small for shared presence mask");
     }
 
     const sharedMask = readPresenceMask(buffer, offset);
@@ -236,29 +236,38 @@ function decodePayload(buffer, applyScaling = true) {
 
     const readingDataSize = calculateSensorDataSizeForMask(sharedMask);
     if (readingDataSize === 0) {
-      throw new Error('Shared presence mask has no fields');
+      throw new Error("Shared presence mask has no fields");
     }
 
     const remaining = buffer.length - offset;
     if (remaining % readingDataSize !== 0) {
-      throw new Error('Invalid payload length for shared presence mask');
+      throw new Error("Invalid payload length for shared presence mask");
     }
 
     const readingCount = remaining / readingDataSize;
     for (let i = 0; i < readingCount; i++) {
-      const { data, bytesRead } = decodeSensorData(buffer, offset, sharedMask, applyScaling);
+      const { data, bytesRead } = decodeSensorData(
+        buffer,
+        offset,
+        sharedMask,
+        applyScaling,
+      );
       if (bytesRead !== readingDataSize) {
-        throw new Error('Internal error: decoded size mismatch');
+        throw new Error("Internal error: decoded size mismatch");
       }
       readings.push({
         presenceMask: sharedMask,
-        ...data
+        ...data,
       });
       offset += bytesRead;
     }
   } else {
     while (offset < buffer.length) {
-      const { reading, bytesRead } = decodeReading(buffer, offset, applyScaling);
+      const { reading, bytesRead } = decodeReading(
+        buffer,
+        offset,
+        applyScaling,
+      );
       readings.push(reading);
       offset += bytesRead;
     }
@@ -267,7 +276,7 @@ function decodePayload(buffer, applyScaling = true) {
   return {
     header,
     readings,
-    readingCount: readings.length
+    readingCount: readings.length,
   };
 }
 
@@ -304,5 +313,5 @@ module.exports = {
   decodeReading,
   decodePayload,
   decodePayloadRaw,
-  decodePayloadToJSON
+  decodePayloadToJSON,
 };
